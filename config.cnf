@@ -1,0 +1,26 @@
+# LSEG自动化程序配置文件
+# 请勿提交此文件到版本控制系统
+
+[lseg_login]
+username = ian.zhu@lseg.com
+password = Welcome802
+
+[sftp]
+host = 192.168.0.117
+username = ian
+password = 3000xtra
+remote_dir = /home/ian/ricchange
+
+[email]
+# 163邮箱SMTP配置 (使用SSL端口465)
+smtp_server = smtp.163.com
+smtp_port = 465
+sender = cbible@163.com
+password = MC6Y6jU8kPMfLmGn
+recipient = ian.zhu@lseg.com
+enable_email = true
+
+[paths]
+downloads_path = C:/Users/jacky/Downloads
+target_dir = c:/ric_change
+target_file = DownloadRicChangeEvents.xlsx 
