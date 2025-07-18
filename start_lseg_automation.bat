@@ -45,12 +45,9 @@ if errorlevel 1 (
     exit /b 1
 )
 
-:: Install/upgrade pip
-python -m pip install --upgrade pip
-
-:: Install required packages
+:: Install required packages (skip pip upgrade to avoid proxy issues)
 echo Installing required packages...
-pip install -r requirements.txt
+pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple/ --trusted-host pypi.tuna.tsinghua.edu.cn
 if errorlevel 1 (
     echo ❌ Failed to install dependencies
     echo 💡 Please check requirements.txt file

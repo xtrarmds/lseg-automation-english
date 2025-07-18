@@ -95,15 +95,11 @@ try {
         exit 1
     }
 
-    # Upgrade pip
-    Write-ColorOutput "Upgrading pip..." "Yellow"
-    python -m pip install --upgrade pip
-
-    # Install required packages
+    # Install required packages (skip pip upgrade to avoid proxy issues)
     Write-ColorOutput "Installing required packages..." "Yellow"
     if (Test-FileExists "requirements.txt") {
         try {
-            pip install -r requirements.txt
+            pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple/ --trusted-host pypi.tuna.tsinghua.edu.cn
             Write-ColorOutput "✅ Dependencies installed successfully" "Green"
         }
         catch {
