@@ -3,12 +3,12 @@
 
 [lseg_login]
 username = ian.zhu@lseg.com
-password = Welcome802
+password = x
 
 [sftp]
 host = 192.168.0.222
 username = ian
-password = 3000xtra
+password = x
 remote_dir = /home/ian/ricchange
 
 [email]
@@ -16,7 +16,7 @@ remote_dir = /home/ian/ricchange
 smtp_server = smtp.163.com
 smtp_port = 465
 sender = cbible@163.com
-password = MC6Y6jU8kPMfLmGn
+password = x
 recipient = ian.zhu@lseg.com
 enable_email = true
 

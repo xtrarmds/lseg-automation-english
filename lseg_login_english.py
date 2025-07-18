@@ -373,6 +373,10 @@ class LSEGLoginAutomation:
             
         except Exception as e:
             print(f"❌ Error processing Excel file: {e}")
+            print(f"   Error type: {type(e).__name__}")
+            print(f"   Error details: {str(e)}")
+            import traceback
+            print(f"   Traceback: {traceback.format_exc()}")
             return None
     
     def cleanup_downloads(self):
@@ -479,7 +483,7 @@ Detailed Information:
 - Original File Download: Successful
 - AU Data Filtering: Successful (Filtered {au_record_count} records)
 - File Save: Successful
-- SFTP Upload: {'Successful' if 'successfully' in upload_result else 'Failed'}
+- SFTP Upload: {'Successful' if 'successfully' in upload_result or 'successful' in upload_result else 'Failed'}
 - Downloads Cleanup: Completed
 
 File Save Location: {file_path if file_path else 'N/A'}
@@ -772,7 +776,11 @@ This email was sent by RIC Change Data Automatic Processing Program"""
             print("⏳ Waiting for login page redirect...")
             time.sleep(3)
             
-            # 6. Click checkbox
+            # 6. Handle Cookie popup before clicking checkbox
+            print("🍪 Handling Cookie popup before proceeding...")
+            self.handle_onetrust_cookie_popup()
+            
+            # 7. Click checkbox
             print("☑️ Clicking checkbox...")
             try:
                 checkbox = self.wait.until(
@@ -784,7 +792,7 @@ This email was sent by RIC Change Data Automatic Processing Program"""
             except TimeoutException:
                 print("⚠️ Checkbox not found, continuing to next step...")
             
-            # 7. Wait for terms-of-use page to load and handle Cookie popup
+            # 8. Wait for terms-of-use page to load and handle Cookie popup again
             print("⏳ Waiting for terms-of-use page to load...")
             time.sleep(3)
             
