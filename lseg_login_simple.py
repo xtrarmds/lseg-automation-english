@@ -1024,8 +1024,7 @@ SFTP上传结果: {upload_result}
             if attempt < max_retries - 1:
                 self.logger.warning(f"⏳ {retry_delay//60} 分钟后重试...")
                 print(f"⏳ {retry_delay//60} 分钟后重试...")
-                # 发送重试通知邮件
-                self.send_email_report(False, None, f"第 {attempt + 1} 次尝试失败，将在 {retry_delay//60} 分钟后重试", 0)
+                # 不在重试时发送邮件，只记录日志
                 time.sleep(retry_delay)
         
         self.logger.error("❌ 所有尝试都失败了，程序退出")
