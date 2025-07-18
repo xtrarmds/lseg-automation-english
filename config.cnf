@@ -6,7 +6,7 @@ username = ian.zhu@lseg.com
 password = Welcome802
 
 [sftp]
-host = 192.168.0.117
+host = 192.168.0.222
 username = ian
 password = 3000xtra
 remote_dir = /home/ian/ricchange

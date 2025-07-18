@@ -202,6 +202,117 @@ class LSEGLoginAutomation:
         
         return None
     
+    def handle_onetrust_cookie_popup(self):
+        """处理OneTrust Cookie弹窗（在最终页面调用）"""
+        if not self.driver or not self.wait:
+            print("⚠️ 浏览器驱动未初始化，跳过Cookie弹窗处理")
+            return False
+            
+        print("🍪 处理OneTrust Cookie弹窗...")
+        
+        # 等待页面完全加载
+        time.sleep(3)
+        
+        # 尝试多种策略处理OneTrust cookie弹窗
+        cookie_handled = False
+        
+        # 策略1: 直接点击Accept按钮
+        try:
+            cookie_button = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
+            )
+            self.driver.execute_script("arguments[0].click();", cookie_button)
+            print("✅ 成功点击OneTrust Accept按钮")
+            cookie_handled = True
+            time.sleep(2)
+        except TimeoutException:
+            print("⚠️ OneTrust Accept按钮未找到...")
+        
+        # 策略2: 如果Accept失败，尝试Reject All
+        if not cookie_handled:
+            try:
+                reject_button = self.driver.find_element(By.ID, "onetrust-reject-all-handler")
+                self.driver.execute_script("arguments[0].click();", reject_button)
+                print("✅ 成功点击OneTrust Reject All按钮")
+                cookie_handled = True
+                time.sleep(2)
+            except NoSuchElementException:
+                print("⚠️ OneTrust Reject按钮也未找到...")
+        
+        # 策略3: 强制移除OneTrust相关元素
+        if not cookie_handled:
+            try:
+                self.driver.execute_script("""
+                     // 移除OneTrust相关元素
+                     var removeElements = [
+                         'onetrust-group-container',
+                         'onetrust-banner-content',
+                         'onetrust-policy-title',
+                         'onetrust-button-group-parent',
+                         'onetrust-button-group',
+                         'onetrust-policy',
+                         'onetrust-pc-btn-handler',
+                         'onetrust-accept-btn-handler',
+                         'onetrust-reject-all-handler'
+                     ];
+                     
+                     removeElements.forEach(function(id) {
+                         var element = document.getElementById(id);
+                         if (element) {
+                             element.remove();
+                             console.log('移除元素: ' + id);
+                         }
+                     });
+                     
+                     // 移除所有OneTrust相关的覆盖层和组件
+                     var selectors = [
+                         '.onetrust-pc-dark-filter',
+                         '.ot-fade-in',
+                         '.ot-sdk-row',
+                         '.ot-sdk-container',
+                         '.banner_logo',
+                         '[id*="onetrust"]',
+                         '[class*="onetrust"]',
+                         '[class*="ot-"]'
+                     ];
+                     
+                     selectors.forEach(function(selector) {
+                         var elements = document.querySelectorAll(selector);
+                         elements.forEach(function(element) {
+                             element.remove();
+                         });
+                     });
+                     
+                     // 强制移除任何高z-index的阻挡元素
+                     var allElements = document.querySelectorAll('*');
+                     allElements.forEach(function(element) {
+                         var style = window.getComputedStyle(element);
+                         var zIndex = parseInt(style.zIndex);
+                         if (zIndex > 1000000) {
+                             element.remove();
+                         }
+                     });
+                     
+                     // 重置body的overflow样式
+                     document.body.style.overflow = 'auto';
+                     document.documentElement.style.overflow = 'auto';
+                     
+                     console.log('OneTrust相关元素已全部移除');
+                 """)
+                print("✅ 强制移除OneTrust组件")
+                cookie_handled = True
+                time.sleep(1)
+            except Exception as e:
+                print(f"⚠️ 强制移除失败: {e}")
+        
+        if cookie_handled:
+            print("✅ Cookie弹窗处理完成")
+        else:
+            print("⚠️ Cookie弹窗处理失败，继续执行...")
+        
+        time.sleep(2)  # 额外等待确保页面稳定
+        return cookie_handled
+    
     def check_downloaded_file(self):
         """检查下载的文件是否存在"""
         file_path = self.downloads_path / self.target_file
@@ -661,112 +772,7 @@ SFTP上传结果: {upload_result}
             print("⏳ 等待登录页面跳转...")
             time.sleep(3)
             
-            # 6. 处理Cookie弹窗（登录后立即处理）
-            print("🍪 处理OneTrust Cookie弹窗...")
-            
-            # 等待页面完全加载
-            time.sleep(3)
-            
-            # 尝试多种策略处理OneTrust cookie弹窗
-            cookie_handled = False
-            
-            # 策略1: 直接点击Accept按钮
-            try:
-                cookie_button = WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
-                )
-                self.driver.execute_script("arguments[0].click();", cookie_button)
-                print("✅ 成功点击OneTrust Accept按钮")
-                cookie_handled = True
-                time.sleep(2)
-            except TimeoutException:
-                print("⚠️ OneTrust Accept按钮未找到...")
-            
-            # 策略2: 如果Accept失败，尝试Reject All
-            if not cookie_handled:
-                try:
-                    reject_button = self.driver.find_element(By.ID, "onetrust-reject-all-handler")
-                    self.driver.execute_script("arguments[0].click();", reject_button)
-                    print("✅ 成功点击OneTrust Reject All按钮")
-                    cookie_handled = True
-                    time.sleep(2)
-                except NoSuchElementException:
-                    print("⚠️ OneTrust Reject按钮也未找到...")
-            
-            # 策略3: 强制移除OneTrust相关元素
-            if not cookie_handled:
-                try:
-                    self.driver.execute_script("""
-                         // 移除OneTrust相关元素
-                         var removeElements = [
-                             'onetrust-group-container',
-                             'onetrust-banner-content',
-                             'onetrust-policy-title',
-                             'onetrust-button-group-parent',
-                             'onetrust-button-group',
-                             'onetrust-policy',
-                             'onetrust-pc-btn-handler',
-                             'onetrust-accept-btn-handler',
-                             'onetrust-reject-all-handler'
-                         ];
-                         
-                         removeElements.forEach(function(id) {
-                             var element = document.getElementById(id);
-                             if (element) {
-                                 element.remove();
-                                 console.log('移除元素: ' + id);
-                             }
-                         });
-                         
-                         // 移除所有OneTrust相关的覆盖层和组件
-                         var selectors = [
-                             '.onetrust-pc-dark-filter',
-                             '.ot-fade-in',
-                             '.ot-sdk-row',
-                             '.ot-sdk-container',
-                             '.banner_logo',
-                             '[id*="onetrust"]',
-                             '[class*="onetrust"]',
-                             '[class*="ot-"]'
-                         ];
-                         
-                         selectors.forEach(function(selector) {
-                             var elements = document.querySelectorAll(selector);
-                             elements.forEach(function(element) {
-                                 element.remove();
-                             });
-                         });
-                         
-                         // 强制移除任何高z-index的阻挡元素
-                         var allElements = document.querySelectorAll('*');
-                         allElements.forEach(function(element) {
-                             var style = window.getComputedStyle(element);
-                             var zIndex = parseInt(style.zIndex);
-                             if (zIndex > 1000000) {
-                                 element.remove();
-                             }
-                         });
-                         
-                         // 重置body的overflow样式
-                         document.body.style.overflow = 'auto';
-                         document.documentElement.style.overflow = 'auto';
-                         
-                         console.log('OneTrust相关元素已全部移除');
-                     """)
-                    print("✅ 强制移除OneTrust组件")
-                    cookie_handled = True
-                    time.sleep(1)
-                except Exception as e:
-                    print(f"⚠️ 强制移除失败: {e}")
-            
-            if cookie_handled:
-                print("✅ Cookie弹窗处理完成")
-            else:
-                print("⚠️ Cookie弹窗处理失败，继续执行...")
-            
-            time.sleep(2)  # 额外等待确保页面稳定
-            
-            # 7. 点击复选框
+            # 6. 点击复选框
             print("☑️ 点击复选框...")
             try:
                 checkbox = self.wait.until(
@@ -841,6 +847,9 @@ SFTP上传结果: {upload_result}
             # 11. 等待最终页面加载
             print("⏳ 等待最终页面加载...")
             time.sleep(5)
+            
+            # 12. 处理OneTrust Cookie弹窗（在最终页面）
+            self.handle_onetrust_cookie_popup()
             
             # 检查登录状态
             current_url = self.driver.current_url
