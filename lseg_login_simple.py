@@ -784,6 +784,19 @@ SFTP上传结果: {upload_result}
             except TimeoutException:
                 print("⚠️ 复选框未找到，继续下一步...")
             
+            # 7. 等待terms-of-use页面加载并处理Cookie弹窗
+            print("⏳ 等待terms-of-use页面加载...")
+            time.sleep(3)
+            
+            # 检查是否到达terms-of-use页面
+            current_url = self.driver.current_url if self.driver else ""
+            if "terms-of-use" in current_url.lower():
+                print("📄 已到达terms-of-use页面，处理Cookie弹窗...")
+                self.handle_onetrust_cookie_popup()
+            else:
+                print(f"⚠️ 当前页面: {current_url}，尝试处理Cookie弹窗...")
+                self.handle_onetrust_cookie_popup()
+            
             # 8. 点击Accept and Continue按钮
             print("✅ 点击Accept and Continue...")
             try:
@@ -847,9 +860,6 @@ SFTP上传结果: {upload_result}
             # 11. 等待最终页面加载
             print("⏳ 等待最终页面加载...")
             time.sleep(5)
-            
-            # 12. 处理OneTrust Cookie弹窗（在最终页面）
-            self.handle_onetrust_cookie_popup()
             
             # 检查登录状态
             current_url = self.driver.current_url
