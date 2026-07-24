@@ -1,0 +1,59 @@
+name: Update Visa Bulletin
+
+on:
+  # 每天自动执行一次
+  schedule:
+    # GitHub 使用 UTC 时间
+    # UTC 18:00 = 北京时间次日 02:00
+    # UTC 18:00 = 纽约夏令时 14:00
+    - cron: "0 18 * * *"
+
+  # 允许在 Actions 页面手动执行
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-visa-bulletin:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: master-english
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4 lxml
+
+      - name: Fetch Visa Bulletin
+        run: |
+          mkdir -p docs
+          python scripts/fetch_visa_bulletin.py
+
+      - name: Validate result.json
+        run: |
+          python -m json.tool docs/result.json > /dev/null
+
+      - name: Commit updated JSON
+        run: |
+          git config user.name "visa-bulletin-bot"
+          git config user.email "visa-bulletin-bot@users.noreply.github.com"
+
+          git add docs/result.json
+
+          if git diff --cached --quiet; then
+            echo "Visa Bulletin data has not changed."
+            exit 0
+          fi
+
+          git commit -m "Update Visa Bulletin data"
+          git push origin HEAD:master-english
