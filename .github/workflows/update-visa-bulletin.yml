@@ -1,36 +1,45 @@
 name: Update Visa Bulletin
 
 on:
+  # 允许在 GitHub Actions 页面手动运行。
   workflow_dispatch:
 
+  # 每天自动运行一次。
+  # GitHub Actions 的 cron 使用 UTC 时间。
   schedule:
-    # 每天 UTC 12:15 运行。
-    # GitHub 的定时任务可能会有几分钟延迟。
     - cron: "15 12 * * *"
 
+# 允许 GITHUB_TOKEN 向当前仓库提交和推送 result.json。
 permissions:
   contents: write
 
+# 防止两个更新任务同时运行。
 concurrency:
   group: update-visa-bulletin
   cancel-in-progress: false
 
 jobs:
   update-visa-bulletin:
+    name: Update China Visa Bulletin
     runs-on: ubuntu-latest
+
+    # 防止访问网站或浏览器异常时任务无限运行。
     timeout-minutes: 15
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
+          # 获取完整提交历史，方便后续 git commit 和 git push。
           fetch-depth: 0
 
+          # 确保 checkout 使用当前工作流分支。
+          ref: ${{ github.ref_name }}
+
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-          cache: pip
 
       - name: Install Python dependencies
         run: |
@@ -50,81 +59,171 @@ jobs:
         run: |
           python - <<'PY'
           import json
+          import re
           from pathlib import Path
 
-          path = Path("docs/result.json")
+          result_path = Path("docs/result.json")
 
-          if not path.exists():
-              raise SystemExit("docs/result.json was not generated")
+          if not result_path.exists():
+              raise SystemExit(
+                  "Validation failed: docs/result.json was not generated"
+              )
 
-          data = json.loads(path.read_text(encoding="utf-8"))
+          try:
+              data = json.loads(
+                  result_path.read_text(encoding="utf-8")
+              )
+          except json.JSONDecodeError as exc:
+              raise SystemExit(
+                  f"Validation failed: invalid JSON: {exc}"
+              ) from exc
+
+          if data.get("schemaVersion") != 2:
+              raise SystemExit(
+                  "Validation failed: schemaVersion must be 2"
+              )
 
           if data.get("status") != "ok":
-              raise SystemExit("result.json status is not ok")
+              raise SystemExit(
+                  "Validation failed: status must be ok"
+              )
+
+          source = data.get("source")
+
+          if not isinstance(source, dict):
+              raise SystemExit(
+                  "Validation failed: source object is missing"
+              )
+
+          if source.get("country") != "China (mainland born)":
+              raise SystemExit(
+                  "Validation failed: unexpected country"
+              )
+
+          if source.get("category") != "Employment-Based":
+              raise SystemExit(
+                  "Validation failed: unexpected visa category"
+              )
 
           latest = data.get("latest")
+
           if not isinstance(latest, dict):
-              raise SystemExit("latest object is missing")
+              raise SystemExit(
+                  "Validation failed: latest object is missing"
+              )
 
           bulletin = latest.get("bulletin")
-          if not bulletin:
-              raise SystemExit("Bulletin month is missing")
+          bulletin_key = latest.get("bulletinKey")
 
-          required = {
+          if not bulletin:
+              raise SystemExit(
+                  "Validation failed: bulletin is missing"
+              )
+
+          if not re.fullmatch(r"\d{4}-\d{2}", bulletin_key or ""):
+              raise SystemExit(
+                  "Validation failed: bulletinKey must use YYYY-MM"
+              )
+
+          final_action = latest.get("finalActionDates")
+          dates_for_filing = latest.get("datesForFiling")
+
+          if not isinstance(final_action, dict):
+              raise SystemExit(
+                  "Validation failed: finalActionDates is missing"
+              )
+
+          if not isinstance(dates_for_filing, dict):
+              raise SystemExit(
+                  "Validation failed: datesForFiling is missing"
+              )
+
+          required_categories = {
               "EB-1",
               "EB-2",
               "EB-3",
               "EB-3 Other Workers",
           }
 
-          final_action = latest.get("finalActionDates", {})
-          filing = latest.get("datesForFiling", {})
+          missing_final_action = (
+              required_categories - set(final_action)
+          )
 
-          missing_final = required - set(final_action)
-          missing_filing = required - set(filing)
+          missing_dates_for_filing = (
+              required_categories - set(dates_for_filing)
+          )
 
-          if missing_final:
+          if missing_final_action:
               raise SystemExit(
-                  f"Final Action missing: {sorted(missing_final)}"
+                  "Validation failed: Final Action missing "
+                  + ", ".join(sorted(missing_final_action))
               )
 
-          if missing_filing:
+          if missing_dates_for_filing:
               raise SystemExit(
-                  f"Dates for Filing missing: {sorted(missing_filing)}"
+                  "Validation failed: Dates for Filing missing "
+                  + ", ".join(sorted(missing_dates_for_filing))
               )
 
-          allowed_special_values = {"C", "U"}
-
-          def validate_value(name, value):
-              if value in allowed_special_values:
+          def validate_cutoff(chart_name, category, value):
+              if value in {"C", "U"}:
                   return
 
-              if (
-                  not isinstance(value, str)
-                  or len(value) != 10
-                  or value[4] != "-"
-                  or value[7] != "-"
-              ):
+              if not isinstance(value, str):
                   raise SystemExit(
-                      f"Invalid cutoff for {name}: {value!r}"
+                      f"Validation failed: "
+                      f"{chart_name} {category} is not a string"
                   )
 
-          for name, value in final_action.items():
-              validate_value(f"Final Action {name}", value)
+              if not re.fullmatch(
+                  r"\d{4}-\d{2}-\d{2}",
+                  value,
+              ):
+                  raise SystemExit(
+                      f"Validation failed: "
+                      f"{chart_name} {category} "
+                      f"has invalid value {value!r}"
+                  )
 
-          for name, value in filing.items():
-              validate_value(f"Dates for Filing {name}", value)
+          for category, value in final_action.items():
+              validate_cutoff(
+                  "Final Action",
+                  category,
+                  value,
+              )
+
+          for category, value in dates_for_filing.items():
+              validate_cutoff(
+                  "Dates for Filing",
+                  category,
+                  value,
+              )
 
           print(f"Validated bulletin: {bulletin}")
+          print(
+              "Final Action required categories: "
+              f"{len(required_categories)}"
+          )
+          print(
+              "Dates for Filing required categories: "
+              f"{len(required_categories)}"
+          )
           print("result.json validation successful")
           PY
 
       - name: Show generated result
         run: |
+          echo "Generated docs/result.json:"
           cat docs/result.json
 
       - name: Commit updated JSON
         run: |
+          echo "Current branch:"
+          git branch --show-current
+
+          echo "Git status before commit:"
+          git status --short
+
           if git diff --quiet -- docs/result.json; then
             echo "No Visa Bulletin changes detected."
             exit 0
@@ -135,5 +234,30 @@ jobs:
             "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add docs/result.json
-          git commit -m "Update China Visa Bulletin data"
-          git push
+
+          git commit \
+            -m "Update China Visa Bulletin data"
+
+          git push origin "HEAD:${{ github.ref_name }}"
+
+      - name: Write job summary
+        if: always()
+        run: |
+          echo "## China Visa Bulletin Update" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Branch: \`${{ github.ref_name }}\`" \
+            >> "$GITHUB_STEP_SUMMARY"
+          echo "- Trigger: \`${{ github.event_name }}\`" \
+            >> "$GITHUB_STEP_SUMMARY"
+          echo "- Result URL:" \
+            >> "$GITHUB_STEP_SUMMARY"
+          echo "  https://xtrarmds.github.io/lseg-automation-english/result.json" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -f docs/result.json ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Generated JSON" >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat docs/result.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
