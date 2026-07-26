@@ -236,6 +236,51 @@ def extract_latest_bulletin_month(text: str) -> str:
     """
     Extract and normalize the latest bulletin month shown
     near the top of the page.
+
+    Examples:
+        Latest edition: August 2026 Visa Bulletin
+        Visa Bulletin — August 2026
+    """
+    patterns = [
+        (
+            rf"Latest edition:\s*"
+            rf"((?:{MONTH_PATTERN})\s+\d{{4}})"
+            rf"\s+Visa Bulletin"
+        ),
+        (
+            rf"Visa Bulletin\s*[—-]\s*"
+            rf"((?:{MONTH_PATTERN})\s+\d{{4}})"
+        ),
+    ]
+
+    for pattern in patterns:
+        match = re.search(
+            pattern,
+            text,
+            re.IGNORECASE,
+        )
+
+        if match:
+            bulletin_text = " ".join(
+                match.group(1).split()
+            )
+
+            print(
+                "Latest bulletin text matched: "
+                f"{bulletin_text}"
+            )
+
+            return normalize_bulletin_month(
+                bulletin_text
+            )
+
+    raise RuntimeError(
+        "Could not determine the latest "
+        "Visa Bulletin month"
+    )
+    """
+    Extract and normalize the latest bulletin month shown
+    near the top of the page.
     """
     patterns = [
         (
