@@ -1,7 +1,73 @@
 {
-  "schemaVersion": 1,
-  "generatedAt": "2026-07-24T14:31:04.929841+00:00",
-  "status": "GitHub Actions test successful",
-  "current": null,
-  "upcoming": null
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-26T18:02:03.263297+00:00",
+  "status": "ok",
+  "source": {
+    "name": "visa-bulletin.us",
+    "country": "China (mainland born)",
+    "category": "Employment-Based",
+    "finalActionUrl": "https://visa-bulletin.us/employment-based/china/?action_type=final_action",
+    "datesForFilingUrl": "https://visa-bulletin.us/employment-based/china/?action_type=filing",
+    "notice": "Third-party data source. Prediction columns are not included. Verify important immigration decisions against official USCIS and Department of State information."
+  },
+  "latest": {
+    "bulletin": "Aug 2026",
+    "bulletinKey": "2026-08",
+    "finalActionDates": {
+      "EB-1": "2023-07-01",
+      "EB-2": "2021-09-01",
+      "EB-3": "2022-01-01",
+      "EB-3 Other Workers": "2019-05-01",
+      "EB-4 Special Immigrants": "2022-10-15",
+      "EB-4 Religious Workers": "2022-10-15",
+      "EB-5 Unreserved": "2016-12-01"
+    },
+    "datesForFiling": {
+      "EB-1": "2023-12-01",
+      "EB-2": "2022-01-01",
+      "EB-3": "2022-01-08",
+      "EB-3 Other Workers": "2019-10-01",
+      "EB-4 Special Immigrants": "2023-01-01",
+      "EB-4 Religious Workers": "2023-01-01",
+      "EB-5 Unreserved": "2017-03-01"
+    },
+    "categoryBulletins": {
+      "finalActionDates": {
+        "EB-1": "Aug 2026",
+        "EB-2": "Aug 2026",
+        "EB-3": "Aug 2026",
+        "EB-3 Other Workers": "Aug 2026",
+        "EB-4 Special Immigrants": "Aug 2026",
+        "EB-4 Religious Workers": "Aug 2026",
+        "EB-5 Unreserved": "Aug 2026",
+        "EB-5 Targeted Employment Areas / Regional Centers": "Apr 2022"
+      },
+      "datesForFiling": {
+        "EB-1": "Aug 2026",
+        "EB-2": "Aug 2026",
+        "EB-3": "Aug 2026",
+        "EB-3 Other Workers": "Aug 2026",
+        "EB-4 Special Immigrants": "Aug 2026",
+        "EB-4 Religious Workers": "Aug 2026",
+        "EB-5 Unreserved": "Aug 2026",
+        "EB-5 Targeted Employment Areas / Regional Centers": "Apr 2022"
+      }
+    },
+    "skippedLegacyCategories": {
+      "finalActionDates": {
+        "EB-5 Targeted Employment Areas / Regional Centers": {
+          "cutoff": "2015-09-15",
+          "bulletin": "Apr 2022",
+          "reason": "Category does not belong to the latest bulletin"
+        }
+      },
+      "datesForFiling": {
+        "EB-5 Targeted Employment Areas / Regional Centers": {
+          "cutoff": "2015-12-15",
+          "bulletin": "Apr 2022",
+          "reason": "Category does not belong to the latest bulletin"
+        }
+      }
+    }
+  }
 }
