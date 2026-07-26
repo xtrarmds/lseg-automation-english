@@ -1,59 +1,139 @@
 name: Update Visa Bulletin
 
 on:
-  # 每天自动执行一次
-  schedule:
-    # GitHub 使用 UTC 时间
-    # UTC 18:00 = 北京时间次日 02:00
-    # UTC 18:00 = 纽约夏令时 14:00
-    - cron: "0 18 * * *"
-
-  # 允许在 Actions 页面手动执行
   workflow_dispatch:
+
+  schedule:
+    # 每天 UTC 12:15 运行。
+    # GitHub 的定时任务可能会有几分钟延迟。
+    - cron: "15 12 * * *"
 
 permissions:
   contents: write
 
+concurrency:
+  group: update-visa-bulletin
+  cancel-in-progress: false
+
 jobs:
   update-visa-bulletin:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: master-english
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 lxml pdfplumber
+          python -m pip install playwright
 
-      - name: Fetch Visa Bulletin
+      - name: Install Chromium
+        run: |
+          python -m playwright install --with-deps chromium
+
+      - name: Fetch China Visa Bulletin
         run: |
           mkdir -p docs
           python scripts/fetch_visa_bulletin.py
 
       - name: Validate result.json
         run: |
-          python -m json.tool docs/result.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("docs/result.json")
+
+          if not path.exists():
+              raise SystemExit("docs/result.json was not generated")
+
+          data = json.loads(path.read_text(encoding="utf-8"))
+
+          if data.get("status") != "ok":
+              raise SystemExit("result.json status is not ok")
+
+          latest = data.get("latest")
+          if not isinstance(latest, dict):
+              raise SystemExit("latest object is missing")
+
+          bulletin = latest.get("bulletin")
+          if not bulletin:
+              raise SystemExit("Bulletin month is missing")
+
+          required = {
+              "EB-1",
+              "EB-2",
+              "EB-3",
+              "EB-3 Other Workers",
+          }
+
+          final_action = latest.get("finalActionDates", {})
+          filing = latest.get("datesForFiling", {})
+
+          missing_final = required - set(final_action)
+          missing_filing = required - set(filing)
+
+          if missing_final:
+              raise SystemExit(
+                  f"Final Action missing: {sorted(missing_final)}"
+              )
+
+          if missing_filing:
+              raise SystemExit(
+                  f"Dates for Filing missing: {sorted(missing_filing)}"
+              )
+
+          allowed_special_values = {"C", "U"}
+
+          def validate_value(name, value):
+              if value in allowed_special_values:
+                  return
+
+              if (
+                  not isinstance(value, str)
+                  or len(value) != 10
+                  or value[4] != "-"
+                  or value[7] != "-"
+              ):
+                  raise SystemExit(
+                      f"Invalid cutoff for {name}: {value!r}"
+                  )
+
+          for name, value in final_action.items():
+              validate_value(f"Final Action {name}", value)
+
+          for name, value in filing.items():
+              validate_value(f"Dates for Filing {name}", value)
+
+          print(f"Validated bulletin: {bulletin}")
+          print("result.json validation successful")
+          PY
+
+      - name: Show generated result
+        run: |
+          cat docs/result.json
 
       - name: Commit updated JSON
         run: |
-          git config user.name "visa-bulletin-bot"
-          git config user.email "visa-bulletin-bot@users.noreply.github.com"
-
-          git add docs/result.json
-
-          if git diff --cached --quiet; then
-            echo "Visa Bulletin data has not changed."
+          if git diff --quiet -- docs/result.json; then
+            echo "No Visa Bulletin changes detected."
             exit 0
           fi
 
-          git commit -m "Update Visa Bulletin data"
-          git push origin HEAD:master-english
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add docs/result.json
+          git commit -m "Update China Visa Bulletin data"
+          git push
