@@ -10,25 +10,46 @@ from playwright.async_api import async_playwright
 BASE_URL = "https://visa-bulletin.us/employment-based/china/"
 
 URLS = {
-    "finalActionDates": f"{BASE_URL}?action_type=final_action",
-    "datesForFiling": f"{BASE_URL}?action_type=filing",
+    "finalActionDates": (
+        f"{BASE_URL}?action_type=final_action"
+    ),
+    "datesForFiling": (
+        f"{BASE_URL}?action_type=filing"
+    ),
 }
 
 OUTPUT_FILE = Path("docs/result.json")
 
-# 第一版先抓取最重要、最容易准确解析的类别。
+
+# Core categories are required.
+# Optional EB-4/EB-5 categories are collected only when they belong
+# to the latest bulletin.
 CATEGORY_PATTERNS = {
     "EB-1": r"EB-1:\s*Priority Workers",
-    "EB-2": r"EB-2:\s*Professionals with Advanced Degrees",
-    "EB-3": r"EB-3:\s*Skilled Workers,\s*Professionals",
-    "EB-3 Other Workers": r"EB-3:\s*Other Workers",
-    "EB-4 Special Immigrants": r"EB-4:\s*Special Immigrants",
-    "EB-4 Religious Workers": r"EB-4:\s*Religious Workers",
-    "EB-5 Unreserved": r"EB-5:\s*Unreserved",
+    "EB-2": (
+        r"EB-2:\s*Professionals with Advanced Degrees"
+    ),
+    "EB-3": (
+        r"EB-3:\s*Skilled Workers,\s*Professionals"
+    ),
+    "EB-3 Other Workers": (
+        r"EB-3:\s*Other Workers"
+    ),
+    "EB-4 Special Immigrants": (
+        r"EB-4:\s*Special Immigrants"
+    ),
+    "EB-4 Religious Workers": (
+        r"EB-4:\s*Religious Workers"
+    ),
+    "EB-5 Unreserved": (
+        r"EB-5:\s*Unreserved"
+    ),
     "EB-5 Targeted Employment Areas / Regional Centers": (
-        r"EB-5:\s*Targeted Employment Areas\s*/\s*Regional Centers"
+        r"EB-5:\s*Targeted Employment Areas\s*/\s*"
+        r"Regional Centers"
     ),
 }
+
 
 REQUIRED_CATEGORIES = {
     "EB-1",
@@ -37,106 +58,317 @@ REQUIRED_CATEGORIES = {
     "EB-3 Other Workers",
 }
 
-MONTHS = {
-    "Jan": "01",
-    "Feb": "02",
-    "Mar": "03",
-    "Apr": "04",
-    "May": "05",
-    "Jun": "06",
-    "Jul": "07",
-    "Aug": "08",
-    "Sep": "09",
-    "Oct": "10",
-    "Nov": "11",
-    "Dec": "12",
+
+MONTH_NUMBERS = {
+    "jan": "01",
+    "january": "01",
+    "feb": "02",
+    "february": "02",
+    "mar": "03",
+    "march": "03",
+    "apr": "04",
+    "april": "04",
+    "may": "05",
+    "jun": "06",
+    "june": "06",
+    "jul": "07",
+    "july": "07",
+    "aug": "08",
+    "august": "08",
+    "sep": "09",
+    "sept": "09",
+    "september": "09",
+    "oct": "10",
+    "october": "10",
+    "nov": "11",
+    "november": "11",
+    "dec": "12",
+    "december": "12",
 }
 
 
-def normalize_cutoff(value: str) -> str:
+MONTH_ABBREVIATIONS = {
+    "01": "Jan",
+    "02": "Feb",
+    "03": "Mar",
+    "04": "Apr",
+    "05": "May",
+    "06": "Jun",
+    "07": "Jul",
+    "08": "Aug",
+    "09": "Sep",
+    "10": "Oct",
+    "11": "Nov",
+    "12": "Dec",
+}
+
+
+MONTH_PATTERN = (
+    r"Jan(?:uary)?|"
+    r"Feb(?:ruary)?|"
+    r"Mar(?:ch)?|"
+    r"Apr(?:il)?|"
+    r"May|"
+    r"Jun(?:e)?|"
+    r"Jul(?:y)?|"
+    r"Aug(?:ust)?|"
+    r"Sep(?:t(?:ember)?|tember)?|"
+    r"Oct(?:ober)?|"
+    r"Nov(?:ember)?|"
+    r"Dec(?:ember)?"
+)
+
+
+def normalize_bulletin_month(value: str) -> str:
     """
-    Convert values such as:
-      Dec 01, 2023 -> 2023-12-01
-      Current      -> C
-      Unavailable  -> U
+    Convert bulletin month values to YYYY-MM.
+
+    Examples:
+        August 2026 -> 2026-08
+        Aug 2026    -> 2026-08
+        Apr 2022    -> 2022-04
     """
     value = " ".join(value.split()).strip()
 
-    if value.lower() in {"current", "c"}:
-        return "C"
-
-    if value.lower() in {"unavailable", "unauthorized", "u"}:
-        return "U"
-
     match = re.fullmatch(
-        r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
-        r"\s+(\d{1,2}),\s+(\d{4})",
+        rf"({MONTH_PATTERN})\s+(\d{{4}})",
+        value,
+        re.IGNORECASE,
+    )
+
+    if not match:
+        raise ValueError(
+            f"Unsupported bulletin month: {value!r}"
+        )
+
+    month_name, year = match.groups()
+    month_number = MONTH_NUMBERS.get(month_name.lower())
+
+    if month_number is None:
+        raise ValueError(
+            f"Unknown bulletin month name: {month_name!r}"
+        )
+
+    return f"{year}-{month_number}"
+
+
+def format_bulletin_month(value: str) -> str:
+    """
+    Convert YYYY-MM to an abbreviated display value.
+
+    Example:
+        2026-08 -> Aug 2026
+    """
+    match = re.fullmatch(
+        r"(\d{4})-(\d{2})",
         value,
     )
 
     if not match:
-        raise ValueError(f"Unsupported cutoff value: {value!r}")
+        raise ValueError(
+            f"Invalid normalized bulletin month: {value!r}"
+        )
 
-    month, day, year = match.groups()
-    return f"{year}-{MONTHS[month]}-{int(day):02d}"
+    year, month_number = match.groups()
+    month_name = MONTH_ABBREVIATIONS.get(month_number)
+
+    if month_name is None:
+        raise ValueError(
+            f"Invalid month number: {month_number!r}"
+        )
+
+    return f"{month_name} {year}"
 
 
-def extract_bulletin_month(text: str) -> str:
+def normalize_cutoff(value: str) -> str:
+    """
+    Convert cutoff values to JSON-friendly values.
+
+    Examples:
+        Dec 01, 2023 -> 2023-12-01
+        December 1, 2023 -> 2023-12-01
+        Current -> C
+        Unavailable -> U
+    """
+    value = " ".join(value.split()).strip()
+
+    if value.lower() in {
+        "current",
+        "c",
+    }:
+        return "C"
+
+    if value.lower() in {
+        "unavailable",
+        "unauthorized",
+        "u",
+    }:
+        return "U"
+
+    match = re.fullmatch(
+        rf"({MONTH_PATTERN})"
+        rf"\s+(\d{{1,2}}),\s+(\d{{4}})",
+        value,
+        re.IGNORECASE,
+    )
+
+    if not match:
+        raise ValueError(
+            f"Unsupported cutoff value: {value!r}"
+        )
+
+    month_name, day, year = match.groups()
+    month_number = MONTH_NUMBERS.get(
+        month_name.lower()
+    )
+
+    if month_number is None:
+        raise ValueError(
+            f"Unknown cutoff month: {month_name!r}"
+        )
+
+    return (
+        f"{year}-{month_number}-{int(day):02d}"
+    )
+
+
+def extract_latest_bulletin_month(text: str) -> str:
+    """
+    Extract and normalize the latest bulletin month shown
+    near the top of the page.
+    """
     patterns = [
-        r"Latest edition:\s*([A-Z][a-z]+\s+\d{4})\s+Visa Bulletin",
-        r"Visa Bulletin\s*[—-]\s*([A-Z][a-z]+\s+\d{4})",
+        (
+            rf"Latest edition:\s*"
+            rf"({MONTH_PATTERN}\s+\d{{4}})"
+            rf"\s+Visa Bulletin"
+        ),
+        (
+            rf"Visa Bulletin\s*[—-]\s*"
+            rf"({MONTH_PATTERN}\s+\d{{4}})"
+        ),
     ]
 
     for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
+        match = re.search(
+            pattern,
+            text,
+            re.IGNORECASE,
+        )
+
         if match:
-            return " ".join(match.group(1).split())
+            return normalize_bulletin_month(
+                match.group(1)
+            )
 
-    raise RuntimeError("Could not determine the latest Visa Bulletin month")
+    raise RuntimeError(
+        "Could not determine the latest "
+        "Visa Bulletin month"
+    )
 
 
-def extract_category(text: str, category_pattern: str) -> tuple[str, str]:
+def extract_category(
+    text: str,
+    category_pattern: str,
+) -> tuple[str, str]:
     """
-    Expected page text near a category:
+    Extract the bulletin month and Current Cutoff for one
+    category.
 
-    EB-1: Priority Workers
-    Aug 2026
-    Dec 01, 2023
-    Dec 01, 2023
-    ...
+    Expected text near a category resembles:
 
-    Only the first date after the bulletin month is Current Cutoff.
-    The later dates belong to prediction columns and must be ignored.
+        EB-1: Priority Workers
+        Aug 2026
+        Jul 01, 2023
+        Jul 01, 2023
+        Jun 07-Aug 26, 2023
+        ...
+
+    The first value after the bulletin month is the Current
+    Cutoff. Later values are predictions and are ignored.
     """
-    pattern = (
-        rf"{category_pattern}"
-        rf"\s+"
-        rf"([A-Z][a-z]{{2}}\s+\d{{4}})"
-        rf"\s+"
-        rf"("
-        rf"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+    category_match = re.search(
+        category_pattern,
+        text,
+        re.IGNORECASE,
+    )
+
+    if not category_match:
+        raise RuntimeError(
+            "Category heading not found using pattern: "
+            f"{category_pattern}"
+        )
+
+    # Examine only a short section after the category heading.
+    # This avoids accidentally reading historical chart data or
+    # another category farther down the page.
+    section = text[
+        category_match.end():
+        category_match.end() + 600
+    ]
+
+    bulletin_match = re.search(
+        rf"\b({MONTH_PATTERN})\s+(\d{{4}})\b",
+        section,
+        re.IGNORECASE,
+    )
+
+    if not bulletin_match:
+        raise RuntimeError(
+            "Bulletin month not found after category: "
+            f"{category_pattern}"
+        )
+
+    bulletin_text = (
+        f"{bulletin_match.group(1)} "
+        f"{bulletin_match.group(2)}"
+    )
+
+    bulletin_month = normalize_bulletin_month(
+        bulletin_text
+    )
+
+    after_bulletin = section[
+        bulletin_match.end():
+    ]
+
+    cutoff_match = re.search(
+        rf"\b("
+        rf"(?:{MONTH_PATTERN})"
         rf"\s+\d{{1,2}},\s+\d{{4}}"
         rf"|Current"
         rf"|Unavailable"
+        rf"|Unauthorized"
         rf"|C"
         rf"|U"
-        rf")"
+        rf")\b",
+        after_bulletin,
+        re.IGNORECASE,
     )
 
-    match = re.search(pattern, text, re.IGNORECASE)
-
-    if not match:
+    if not cutoff_match:
         raise RuntimeError(
-            f"Could not extract category using pattern: {category_pattern}"
+            "Current Cutoff not found after category: "
+            f"{category_pattern}"
         )
 
-    bulletin = " ".join(match.group(1).split())
-    cutoff = normalize_cutoff(match.group(2))
+    cutoff = normalize_cutoff(
+        cutoff_match.group(1)
+    )
 
-    return bulletin, cutoff
+    return bulletin_month, cutoff
 
 
-async def fetch_page_text(page, url: str) -> str:
+async def fetch_page_text(
+    page,
+    url: str,
+) -> str:
+    """
+    Load one page through Chromium and return its rendered
+    body text.
+    """
+    print(f"Opening URL: {url}")
+
     response = await page.goto(
         url,
         wait_until="domcontentloaded",
@@ -144,80 +376,226 @@ async def fetch_page_text(page, url: str) -> str:
     )
 
     if response is None:
-        raise RuntimeError(f"No HTTP response received for {url}")
+        raise RuntimeError(
+            f"No HTTP response received for {url}"
+        )
+
+    print(f"HTTP status: {response.status}")
+    print(f"Final URL: {page.url}")
 
     if response.status >= 400:
-        raise RuntimeError(f"HTTP {response.status} returned for {url}")
+        raise RuntimeError(
+            f"HTTP {response.status} returned for {url}"
+        )
 
-    # Give client-side rendering time to finish.
-    await page.wait_for_timeout(5000)
+    # Allow JavaScript-rendered data to finish loading.
+    await page.wait_for_timeout(7000)
 
-    body = page.locator("body")
-    text = await body.inner_text(timeout=30000)
+    text = await page.locator("body").inner_text(
+        timeout=30000
+    )
+
+    print(f"Page title: {await page.title()}")
+    print(f"Body text length: {len(text)}")
 
     if "Current Cutoff" not in text:
         raise RuntimeError(
-            f"Page loaded but expected table content was not found: {url}"
+            "Page loaded, but the Current Cutoff "
+            f"table was not found: {url}"
+        )
+
+    if "EB-1: Priority Workers" not in text:
+        raise RuntimeError(
+            "Page loaded, but EB-1 data was not found: "
+            f"{url}"
         )
 
     return text
 
 
-async def extract_chart(page, chart_name: str, url: str) -> dict:
+async def extract_chart(
+    page,
+    chart_name: str,
+    url: str,
+) -> dict:
+    """
+    Extract one complete chart.
+
+    Core categories must exist and belong to the latest
+    bulletin. Optional categories are retained only if they
+    also belong to the latest bulletin.
+    """
+    print()
     print(f"Fetching {chart_name}: {url}")
 
-    text = await fetch_page_text(page, url)
-    latest_month = extract_bulletin_month(text)
+    text = await fetch_page_text(
+        page,
+        url,
+    )
 
-    data = {}
-    row_months = set()
+    latest_month = extract_latest_bulletin_month(
+        text
+    )
 
-    for category_name, category_pattern in CATEGORY_PATTERNS.items():
+    print(
+        "Latest bulletin detected: "
+        f"{format_bulletin_month(latest_month)}"
+    )
+
+    current_values = {}
+    category_bulletins = {}
+    skipped_categories = {}
+    required_row_months = set()
+
+    for (
+        category_name,
+        category_pattern,
+    ) in CATEGORY_PATTERNS.items():
         try:
-            row_month, cutoff = extract_category(text, category_pattern)
-            data[category_name] = cutoff
-            row_months.add(row_month)
-            print(f"  {category_name}: {cutoff}")
-        except RuntimeError as exc:
-            # Optional EB-4/EB-5 rows may change naming.
+            (
+                category_month,
+                cutoff,
+            ) = extract_category(
+                text,
+                category_pattern,
+            )
+
+            category_bulletins[
+                category_name
+            ] = category_month
+
             if category_name in REQUIRED_CATEGORIES:
-                raise
-            print(f"  Warning: {category_name}: {exc}")
+                required_row_months.add(
+                    category_month
+                )
 
-    missing = REQUIRED_CATEGORIES - data.keys()
+            # Only publish categories that belong to the latest
+            # bulletin. Some legacy EB-5 categories still show
+            # Apr 2022 on the website.
+            if category_month == latest_month:
+                current_values[
+                    category_name
+                ] = cutoff
 
-    if missing:
+                print(
+                    f"  {category_name}: {cutoff} "
+                    f"(bulletin: "
+                    f"{format_bulletin_month(category_month)})"
+                )
+            else:
+                skipped_categories[
+                    category_name
+                ] = {
+                    "cutoff": cutoff,
+                    "bulletin": (
+                        format_bulletin_month(
+                            category_month
+                        )
+                    ),
+                    "reason": (
+                        "Category does not belong to "
+                        "the latest bulletin"
+                    ),
+                }
+
+                print(
+                    f"  Skipping {category_name}: "
+                    f"{cutoff} "
+                    f"(category bulletin: "
+                    f"{format_bulletin_month(category_month)}, "
+                    f"latest bulletin: "
+                    f"{format_bulletin_month(latest_month)})"
+                )
+
+        except (
+            RuntimeError,
+            ValueError,
+        ) as exc:
+            if category_name in REQUIRED_CATEGORIES:
+                raise RuntimeError(
+                    f"Required category "
+                    f"{category_name} failed: {exc}"
+                ) from exc
+
+            print(
+                f"  Warning: optional category "
+                f"{category_name}: {exc}"
+            )
+
+    missing_categories = (
+        REQUIRED_CATEGORIES
+        - current_values.keys()
+    )
+
+    if missing_categories:
         raise RuntimeError(
-            f"{chart_name} is missing required categories: "
-            f"{', '.join(sorted(missing))}"
+            f"{chart_name} is missing required "
+            f"current categories: "
+            f"{', '.join(sorted(missing_categories))}"
         )
 
-    if len(row_months) != 1:
+    if len(required_row_months) != 1:
+        displayed_months = [
+            format_bulletin_month(value)
+            for value in sorted(
+                required_row_months
+            )
+        ]
+
         raise RuntimeError(
-            f"{chart_name} contains inconsistent bulletin months: "
-            f"{sorted(row_months)}"
+            f"{chart_name} required categories contain "
+            f"inconsistent bulletin months: "
+            f"{displayed_months}"
         )
 
-    row_month = next(iter(row_months))
+    required_month = next(
+        iter(required_row_months)
+    )
 
-    if latest_month.lower() != row_month.lower():
+    if required_month != latest_month:
         raise RuntimeError(
-            f"Latest edition is {latest_month}, but table rows show {row_month}"
+            f"{chart_name} latest edition is "
+            f"{format_bulletin_month(latest_month)}, "
+            f"but required category rows show "
+            f"{format_bulletin_month(required_month)}"
         )
 
     return {
-        "bulletin": row_month,
-        "values": data,
+        "bulletin": latest_month,
+        "values": current_values,
+        "categoryBulletins": {
+            category_name: format_bulletin_month(
+                month_value
+            )
+            for (
+                category_name,
+                month_value,
+            ) in category_bulletins.items()
+        },
+        "skippedCategories": skipped_categories,
     }
 
 
 def load_existing_result() -> dict | None:
+    """
+    Load the previous result for diagnostics.
+
+    The previous file is never overwritten until both charts
+    have been fetched and validated successfully.
+    """
     if not OUTPUT_FILE.exists():
         return None
 
     try:
-        return json.loads(OUTPUT_FILE.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        return json.loads(
+            OUTPUT_FILE.read_text(
+                encoding="utf-8"
+            )
+        )
+    except (
+        OSError,
+        json.JSONDecodeError,
+    ):
         return None
 
 
@@ -235,12 +613,18 @@ async def main() -> None:
 
         context = await browser.new_context(
             user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/126.0.0.0 Safari/537.36"
+                "Mozilla/5.0 "
+                "(Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 "
+                "(KHTML, like Gecko) "
+                "Chrome/126.0.0.0 "
+                "Safari/537.36"
             ),
             locale="en-US",
-            viewport={"width": 1440, "height": 1200},
+            viewport={
+                "width": 1440,
+                "height": 1200,
+            },
         )
 
         page = await context.new_page()
@@ -258,54 +642,128 @@ async def main() -> None:
                 URLS["datesForFiling"],
             )
         finally:
+            await context.close()
             await browser.close()
 
-    if final_action["bulletin"] != dates_for_filing["bulletin"]:
+    if (
+        final_action["bulletin"]
+        != dates_for_filing["bulletin"]
+    ):
         raise RuntimeError(
-            "Final Action and Dates for Filing bulletin months differ: "
-            f"{final_action['bulletin']} vs "
-            f"{dates_for_filing['bulletin']}"
+            "Final Action and Dates for Filing "
+            "bulletin months differ: "
+            f"{format_bulletin_month(final_action['bulletin'])} "
+            "vs "
+            f"{format_bulletin_month(dates_for_filing['bulletin'])}"
         )
+
+    bulletin_month = final_action["bulletin"]
 
     result = {
         "schemaVersion": 2,
-        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "generatedAt": (
+            datetime.now(timezone.utc).isoformat()
+        ),
         "status": "ok",
         "source": {
             "name": "visa-bulletin.us",
             "country": "China (mainland born)",
             "category": "Employment-Based",
-            "finalActionUrl": URLS["finalActionDates"],
-            "datesForFilingUrl": URLS["datesForFiling"],
+            "finalActionUrl": (
+                URLS["finalActionDates"]
+            ),
+            "datesForFilingUrl": (
+                URLS["datesForFiling"]
+            ),
             "notice": (
-                "Third-party data source. Predictions are not included. "
-                "Verify important decisions against official USCIS and "
-                "Department of State information."
+                "Third-party data source. Prediction "
+                "columns are not included. Verify "
+                "important immigration decisions against "
+                "official USCIS and Department of State "
+                "information."
             ),
         },
         "latest": {
-            "bulletin": final_action["bulletin"],
-            "finalActionDates": final_action["values"],
-            "datesForFiling": dates_for_filing["values"],
+            "bulletin": (
+                format_bulletin_month(
+                    bulletin_month
+                )
+            ),
+            "bulletinKey": bulletin_month,
+            "finalActionDates": (
+                final_action["values"]
+            ),
+            "datesForFiling": (
+                dates_for_filing["values"]
+            ),
+            "categoryBulletins": {
+                "finalActionDates": (
+                    final_action[
+                        "categoryBulletins"
+                    ]
+                ),
+                "datesForFiling": (
+                    dates_for_filing[
+                        "categoryBulletins"
+                    ]
+                ),
+            },
+            "skippedLegacyCategories": {
+                "finalActionDates": (
+                    final_action[
+                        "skippedCategories"
+                    ]
+                ),
+                "datesForFiling": (
+                    dates_for_filing[
+                        "skippedCategories"
+                    ]
+                ),
+            },
         },
     }
 
-    OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    OUTPUT_FILE.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
-    temporary_file = OUTPUT_FILE.with_suffix(".json.tmp")
+    # Write to a temporary file first. This prevents a failed or
+    # interrupted run from corrupting the existing result.
+    temporary_file = OUTPUT_FILE.with_suffix(
+        ".json.tmp"
+    )
+
     temporary_file.write_text(
-        json.dumps(result, ensure_ascii=False, indent=2) + "\n",
+        json.dumps(
+            result,
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
         encoding="utf-8",
     )
+
     temporary_file.replace(OUTPUT_FILE)
 
-    print(f"Successfully wrote {OUTPUT_FILE}")
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    print()
+    print(
+        f"Successfully wrote {OUTPUT_FILE}"
+    )
+    print(
+        json.dumps(
+            result,
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
-    # existing_result is intentionally only kept for diagnostics.
-    # The output file is replaced only after both charts pass validation.
     if existing_result:
-        print("Previous result existed and was replaced after validation.")
+        print()
+        print(
+            "Previous result existed and was replaced "
+            "only after both charts passed validation."
+        )
 
 
 if __name__ == "__main__":
