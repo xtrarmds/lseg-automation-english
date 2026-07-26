@@ -1,573 +1,312 @@
-import io
+import asyncio
 import json
 import re
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urljoin
 
-import pdfplumber
-import requests
-from bs4 import BeautifulSoup
+from playwright.async_api import async_playwright
 
 
-INDEX_URL = (
-    "https://travel.state.gov/content/travel/en/legal/"
-    "visa-law0/visa-bulletin.html"
-)
+BASE_URL = "https://visa-bulletin.us/employment-based/china/"
+
+URLS = {
+    "finalActionDates": f"{BASE_URL}?action_type=final_action",
+    "datesForFiling": f"{BASE_URL}?action_type=filing",
+}
 
 OUTPUT_FILE = Path("docs/result.json")
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (compatible; VisaBulletinMonitor/1.0; "
-        "+https://github.com/xtrarmds/lseg-automation-english)"
+# 第一版先抓取最重要、最容易准确解析的类别。
+CATEGORY_PATTERNS = {
+    "EB-1": r"EB-1:\s*Priority Workers",
+    "EB-2": r"EB-2:\s*Professionals with Advanced Degrees",
+    "EB-3": r"EB-3:\s*Skilled Workers,\s*Professionals",
+    "EB-3 Other Workers": r"EB-3:\s*Other Workers",
+    "EB-4 Special Immigrants": r"EB-4:\s*Special Immigrants",
+    "EB-4 Religious Workers": r"EB-4:\s*Religious Workers",
+    "EB-5 Unreserved": r"EB-5:\s*Unreserved",
+    "EB-5 Targeted Employment Areas / Regional Centers": (
+        r"EB-5:\s*Targeted Employment Areas\s*/\s*Regional Centers"
     ),
-    "Accept-Language": "en-US,en;q=0.9",
 }
 
-CATEGORY_NAMES = {
-    "1st": "EB1",
-    "2nd": "EB2",
-    "3rd": "EB3",
-    "other workers": "EB3OtherWorkers",
-    "4th": "EB4",
-    "certain religious workers": "EB4CertainReligiousWorkers",
-    "5th unreserved": "EB5Unreserved",
-    "5th set aside rural": "EB5Rural",
-    "5th set aside high unemployment": "EB5HighUnemployment",
-    "5th set aside infrastructure": "EB5Infrastructure",
+REQUIRED_CATEGORIES = {
+    "EB-1",
+    "EB-2",
+    "EB-3",
+    "EB-3 Other Workers",
+}
+
+MONTHS = {
+    "Jan": "01",
+    "Feb": "02",
+    "Mar": "03",
+    "Apr": "04",
+    "May": "05",
+    "Jun": "06",
+    "Jul": "07",
+    "Aug": "08",
+    "Sep": "09",
+    "Oct": "10",
+    "Nov": "11",
+    "Dec": "12",
 }
 
 
-def clean_text(value):
-    """Normalize whitespace and non-breaking spaces."""
-    if value is None:
-        return ""
-
-    value = str(value).replace("\xa0", " ")
-    value = re.sub(r"\s+", " ", value)
-    return value.strip()
-
-
-def normalize_for_match(value):
-    """Create a simplified string for case-insensitive matching."""
-    value = clean_text(value).lower()
-
-    replacements = {
-        "–": "-",
-        "—": "-",
-        "‑": "-",
-        "\u2019": "'",
-    }
-
-    for old, new in replacements.items():
-        value = value.replace(old, new)
-
-    return value
-
-
-def normalize_date(value):
+def normalize_cutoff(value: str) -> str:
     """
-    Convert Department of State values into app-friendly values.
-
-    Examples:
-      15NOV22 -> 2022-11-15
-      15-NOV-22 -> 2022-11-15
-      C -> CURRENT
-      U -> UNAVAILABLE
+    Convert values such as:
+      Dec 01, 2023 -> 2023-12-01
+      Current      -> C
+      Unavailable  -> U
     """
-    value = clean_text(value).upper().replace(" ", "")
+    value = " ".join(value.split()).strip()
 
-    if not value:
-        return None
+    if value.lower() in {"current", "c"}:
+        return "C"
 
-    if value in {"C", "CURRENT"}:
-        return "CURRENT"
-
-    if value in {"U", "UNAVAILABLE"}:
-        return "UNAVAILABLE"
-
-    month_numbers = {
-        "JAN": "01",
-        "FEB": "02",
-        "MAR": "03",
-        "APR": "04",
-        "MAY": "05",
-        "JUN": "06",
-        "JUL": "07",
-        "AUG": "08",
-        "SEP": "09",
-        "OCT": "10",
-        "NOV": "11",
-        "DEC": "12",
-    }
+    if value.lower() in {"unavailable", "unauthorized", "u"}:
+        return "U"
 
     match = re.fullmatch(
-        r"(\d{1,2})-?([A-Z]{3})-?(\d{2}|\d{4})",
+        r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+        r"\s+(\d{1,2}),\s+(\d{4})",
         value,
     )
 
     if not match:
-        return clean_text(value)
+        raise ValueError(f"Unsupported cutoff value: {value!r}")
 
-    day, month, year = match.groups()
+    month, day, year = match.groups()
+    return f"{year}-{MONTHS[month]}-{int(day):02d}"
 
-    if month not in month_numbers:
-        return clean_text(value)
 
-    if len(year) == 2:
-        numeric_year = int(year)
-        year = (
-            f"20{numeric_year:02d}"
-            if numeric_year <= 69
-            else f"19{numeric_year:02d}"
+def extract_bulletin_month(text: str) -> str:
+    patterns = [
+        r"Latest edition:\s*([A-Z][a-z]+\s+\d{4})\s+Visa Bulletin",
+        r"Visa Bulletin\s*[—-]\s*([A-Z][a-z]+\s+\d{4})",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return " ".join(match.group(1).split())
+
+    raise RuntimeError("Could not determine the latest Visa Bulletin month")
+
+
+def extract_category(text: str, category_pattern: str) -> tuple[str, str]:
+    """
+    Expected page text near a category:
+
+    EB-1: Priority Workers
+    Aug 2026
+    Dec 01, 2023
+    Dec 01, 2023
+    ...
+
+    Only the first date after the bulletin month is Current Cutoff.
+    The later dates belong to prediction columns and must be ignored.
+    """
+    pattern = (
+        rf"{category_pattern}"
+        rf"\s+"
+        rf"([A-Z][a-z]{{2}}\s+\d{{4}})"
+        rf"\s+"
+        rf"("
+        rf"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+        rf"\s+\d{{1,2}},\s+\d{{4}}"
+        rf"|Current"
+        rf"|Unavailable"
+        rf"|C"
+        rf"|U"
+        rf")"
+    )
+
+    match = re.search(pattern, text, re.IGNORECASE)
+
+    if not match:
+        raise RuntimeError(
+            f"Could not extract category using pattern: {category_pattern}"
         )
 
-    return f"{year}-{month_numbers[month]}-{int(day):02d}"
+    bulletin = " ".join(match.group(1).split())
+    cutoff = normalize_cutoff(match.group(2))
 
+    return bulletin, cutoff
 
-def category_key(value):
-    """Map an official table category label to a stable JSON key."""
-    text = normalize_for_match(value)
 
-    text = text.replace("*", "")
-    text = text.replace("employment-", "")
-    text = text.replace("employment based", "")
-    text = clean_text(text)
-
-    if text.startswith("1st"):
-        return "EB1"
-
-    if text.startswith("2nd"):
-        return "EB2"
-
-    if text.startswith("3rd"):
-        return "EB3"
-
-    if "other workers" in text:
-        return "EB3OtherWorkers"
-
-    if text.startswith("4th") and "religious" not in text:
-        return "EB4"
-
-    if "certain religious workers" in text:
-        return "EB4CertainReligiousWorkers"
-
-    if "5th" in text and "unreserved" in text:
-        return "EB5Unreserved"
-
-    if "5th" in text and "rural" in text:
-        return "EB5Rural"
-
-    if "5th" in text and (
-        "high unemployment" in text
-        or "high-unemployment" in text
-    ):
-        return "EB5HighUnemployment"
-
-    if "5th" in text and "infrastructure" in text:
-        return "EB5Infrastructure"
-
-    if text.startswith("5th"):
-        return "EB5"
-
-    return None
-
-
-def is_china_header(value):
-    """Identify the China-mainland born table column."""
-    text = normalize_for_match(value)
-    return "china" in text and "mainland" in text
-
-
-def identify_table_type(context):
-    """
-    Determine whether a table is employment Table A or Table B.
-
-    Table A = Final Action Dates
-    Table B = Dates for Filing
-    """
-    text = normalize_for_match(context)
-
-    if "employment" not in text:
-        return None
-
-    if "final action dates" in text:
-        return "tableA"
-
-    if "dates for filing" in text:
-        return "tableB"
-
-    return None
-
-
-def extract_rows(rows):
-    """Extract China employment values from a normalized table matrix."""
-    cleaned_rows = []
-
-    for row in rows:
-        if not row:
-            continue
-
-        cleaned = [clean_text(cell) for cell in row]
-
-        if any(cleaned):
-            cleaned_rows.append(cleaned)
-
-    if not cleaned_rows:
-        return {}
-
-    header_index = None
-    china_index = None
-
-    for row_index, row in enumerate(cleaned_rows[:6]):
-        for column_index, cell in enumerate(row):
-            if is_china_header(cell):
-                header_index = row_index
-                china_index = column_index
-                break
-
-        if china_index is not None:
-            break
-
-    if china_index is None:
-        return {}
-
-    values = {}
-
-    for row in cleaned_rows[header_index + 1:]:
-        if len(row) <= china_index:
-            continue
-
-        category = category_key(row[0])
-
-        # Occasionally the first column is blank because of merged PDF cells.
-        if category is None and len(row) > 1:
-            category = category_key(row[1])
-
-        if category is None:
-            continue
-
-        china_value = normalize_date(row[china_index])
-
-        if china_value:
-            values[category] = china_value
-
-    return values
-
-
-def extract_html_tables(content):
-    """Extract employment Table A and Table B from an HTML bulletin."""
-    soup = BeautifulSoup(content, "lxml")
-
-    result = {
-        "tableA": {},
-        "tableB": {},
-    }
-
-    tables = soup.find_all("table")
-
-    for table in tables:
-        context_parts = []
-
-        previous = table.find_previous(
-            ["h1", "h2", "h3", "h4", "h5", "p", "strong"]
-        )
-
-        if previous:
-            context_parts.append(previous.get_text(" ", strip=True))
-
-        parent = table.parent
-        if parent:
-            context_parts.append(parent.get_text(" ", strip=True)[:1200])
-
-        context = " ".join(context_parts)
-        table_type = identify_table_type(context)
-
-        rows = []
-
-        for tr in table.find_all("tr"):
-            cells = tr.find_all(["th", "td"])
-            rows.append(
-                [cell.get_text(" ", strip=True) for cell in cells]
-            )
-
-        # If nearby text was insufficient, inspect the table itself.
-        if table_type is None:
-            table_type = identify_table_type(
-                table.get_text(" ", strip=True)
-            )
-
-        if table_type:
-            extracted = extract_rows(rows)
-            if extracted:
-                result[table_type].update(extracted)
-
-    return result
-
-
-def extract_pdf_tables(content):
-    """Extract employment Table A and Table B from a PDF bulletin."""
-    result = {
-        "tableA": {},
-        "tableB": {},
-    }
-
-    current_section = None
-
-    with pdfplumber.open(io.BytesIO(content)) as pdf:
-        for page in pdf.pages:
-            page_text = page.extract_text() or ""
-            normalized_page_text = normalize_for_match(page_text)
-
-            if (
-                "final action dates for employment-based"
-                in normalized_page_text
-            ):
-                current_section = "tableA"
-
-            if (
-                "dates for filing of employment-based"
-                in normalized_page_text
-                or "dates for filing employment-based"
-                in normalized_page_text
-            ):
-                current_section = "tableB"
-
-            tables = page.extract_tables(
-                {
-                    "vertical_strategy": "lines",
-                    "horizontal_strategy": "lines",
-                    "intersection_tolerance": 5,
-                    "snap_tolerance": 4,
-                    "join_tolerance": 4,
-                }
-            )
-
-            # Some PDFs have no visible table borders.
-            if not tables:
-                tables = page.extract_tables(
-                    {
-                        "vertical_strategy": "text",
-                        "horizontal_strategy": "text",
-                        "intersection_tolerance": 5,
-                        "snap_tolerance": 4,
-                        "join_tolerance": 4,
-                        "min_words_vertical": 2,
-                        "min_words_horizontal": 1,
-                    }
-                )
-
-            for table in tables:
-                if not table:
-                    continue
-
-                flattened = " ".join(
-                    clean_text(cell)
-                    for row in table
-                    if row
-                    for cell in row
-                    if cell
-                )
-
-                table_type = identify_table_type(flattened)
-
-                if table_type is None:
-                    table_type = current_section
-
-                if table_type not in {"tableA", "tableB"}:
-                    continue
-
-                extracted = extract_rows(table)
-
-                if extracted:
-                    result[table_type].update(extracted)
-
-    return result
-
-
-def get_page(url):
-    """Download a page and return response content and content type."""
-    response = requests.get(
+async def fetch_page_text(page, url: str) -> str:
+    response = await page.goto(
         url,
-        headers=HEADERS,
-        timeout=45,
+        wait_until="domcontentloaded",
+        timeout=90000,
     )
-    response.raise_for_status()
 
-    content_type = response.headers.get("Content-Type", "").lower()
+    if response is None:
+        raise RuntimeError(f"No HTTP response received for {url}")
 
-    return response.content, content_type
+    if response.status >= 400:
+        raise RuntimeError(f"HTTP {response.status} returned for {url}")
 
+    # Give client-side rendering time to finish.
+    await page.wait_for_timeout(5000)
 
-def find_bulletin_links():
-    """Find Current and Upcoming bulletin links on the official index."""
-    content, _ = get_page(INDEX_URL)
-    soup = BeautifulSoup(content, "lxml")
+    body = page.locator("body")
+    text = await body.inner_text(timeout=30000)
 
-    links = {
-        "current": None,
-        "upcoming": None,
-    }
-
-    for anchor in soup.find_all("a", href=True):
-        text = clean_text(anchor.get_text(" ", strip=True))
-        normalized = normalize_for_match(text)
-        absolute_url = urljoin(INDEX_URL, anchor["href"])
-
-        if (
-            normalized.startswith("current visa bulletin")
-            and links["current"] is None
-        ):
-            links["current"] = {
-                "label": text,
-                "url": absolute_url,
-            }
-
-        if (
-            normalized.startswith("upcoming visa bulletin")
-            and links["upcoming"] is None
-        ):
-            links["upcoming"] = {
-                "label": text,
-                "url": absolute_url,
-            }
-
-    if links["current"] is None:
+    if "Current Cutoff" not in text:
         raise RuntimeError(
-            "Could not find the Current Visa Bulletin link."
+            f"Page loaded but expected table content was not found: {url}"
         )
 
-    return links
+    return text
 
 
-def extract_month(label, url):
-    """Extract a month/year label from link text or URL."""
-    combined = f"{label} {url}"
+async def extract_chart(page, chart_name: str, url: str) -> dict:
+    print(f"Fetching {chart_name}: {url}")
 
-    match = re.search(
-        r"\b("
-        r"January|February|March|April|May|June|July|August|"
-        r"September|October|November|December"
-        r")\s+(\d{4})\b",
-        combined,
-        re.IGNORECASE,
-    )
+    text = await fetch_page_text(page, url)
+    latest_month = extract_bulletin_month(text)
 
-    if match:
-        month = match.group(1).capitalize()
-        year = match.group(2)
-        return f"{month} {year}"
+    data = {}
+    row_months = set()
 
-    return None
+    for category_name, category_pattern in CATEGORY_PATTERNS.items():
+        try:
+            row_month, cutoff = extract_category(text, category_pattern)
+            data[category_name] = cutoff
+            row_months.add(row_month)
+            print(f"  {category_name}: {cutoff}")
+        except RuntimeError as exc:
+            # Optional EB-4/EB-5 rows may change naming.
+            if category_name in REQUIRED_CATEGORIES:
+                raise
+            print(f"  Warning: {category_name}: {exc}")
 
+    missing = REQUIRED_CATEGORIES - data.keys()
 
-def parse_bulletin(label, url):
-    """Download and parse one current or upcoming bulletin."""
-    content, content_type = get_page(url)
-
-    is_pdf = (
-        "application/pdf" in content_type
-        or url.lower().split("?")[0].endswith(".pdf")
-        or content.startswith(b"%PDF")
-    )
-
-    if is_pdf:
-        tables = extract_pdf_tables(content)
-        source_type = "pdf"
-    else:
-        tables = extract_html_tables(content)
-        source_type = "html"
-
-    if not tables["tableA"] and not tables["tableB"]:
+    if missing:
         raise RuntimeError(
-            "No China employment-based Table A or Table B data "
-            f"was found in {url}"
+            f"{chart_name} is missing required categories: "
+            f"{', '.join(sorted(missing))}"
+        )
+
+    if len(row_months) != 1:
+        raise RuntimeError(
+            f"{chart_name} contains inconsistent bulletin months: "
+            f"{sorted(row_months)}"
+        )
+
+    row_month = next(iter(row_months))
+
+    if latest_month.lower() != row_month.lower():
+        raise RuntimeError(
+            f"Latest edition is {latest_month}, but table rows show {row_month}"
         )
 
     return {
-        "month": extract_month(label, url),
-        "url": url,
-        "sourceType": source_type,
-        "employmentBased": tables,
+        "bulletin": row_month,
+        "values": data,
     }
 
 
-def main():
-    generated_at = datetime.now(timezone.utc).isoformat()
-    links = find_bulletin_links()
+def load_existing_result() -> dict | None:
+    if not OUTPUT_FILE.exists():
+        return None
 
-    result = {
-        "schemaVersion": 1,
-        "generatedAt": generated_at,
-        "country": "CHINA-mainland born",
-        "source": {
-            "name": "U.S. Department of State Visa Bulletin",
-            "indexUrl": INDEX_URL,
-        },
-        "current": None,
-        "upcoming": None,
-        "errors": [],
-    }
+    try:
+        return json.loads(OUTPUT_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
 
-    for bulletin_type in ("current", "upcoming"):
-        bulletin_link = links.get(bulletin_type)
 
-        if bulletin_link is None:
-            result["errors"].append(
-                {
-                    "bulletin": bulletin_type,
-                    "message": (
-                        f"{bulletin_type.capitalize()} bulletin "
-                        "link was not available."
-                    ),
-                }
-            )
-            continue
+async def main() -> None:
+    existing_result = load_existing_result()
+
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch(
+            headless=True,
+            args=[
+                "--disable-dev-shm-usage",
+                "--no-sandbox",
+            ],
+        )
+
+        context = await browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/126.0.0.0 Safari/537.36"
+            ),
+            locale="en-US",
+            viewport={"width": 1440, "height": 1200},
+        )
+
+        page = await context.new_page()
 
         try:
-            result[bulletin_type] = parse_bulletin(
-                bulletin_link["label"],
-                bulletin_link["url"],
-            )
-        except Exception as error:
-            result["errors"].append(
-                {
-                    "bulletin": bulletin_type,
-                    "url": bulletin_link["url"],
-                    "message": str(error),
-                }
+            final_action = await extract_chart(
+                page,
+                "Final Action Dates",
+                URLS["finalActionDates"],
             )
 
-    if (
-        result["current"] is None
-        and result["upcoming"] is None
-    ):
+            dates_for_filing = await extract_chart(
+                page,
+                "Dates for Filing",
+                URLS["datesForFiling"],
+            )
+        finally:
+            await browser.close()
+
+    if final_action["bulletin"] != dates_for_filing["bulletin"]:
         raise RuntimeError(
-            "Neither Current nor Upcoming bulletin could be parsed: "
-            + json.dumps(result["errors"], ensure_ascii=False)
+            "Final Action and Dates for Filing bulletin months differ: "
+            f"{final_action['bulletin']} vs "
+            f"{dates_for_filing['bulletin']}"
         )
+
+    result = {
+        "schemaVersion": 2,
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "status": "ok",
+        "source": {
+            "name": "visa-bulletin.us",
+            "country": "China (mainland born)",
+            "category": "Employment-Based",
+            "finalActionUrl": URLS["finalActionDates"],
+            "datesForFilingUrl": URLS["datesForFiling"],
+            "notice": (
+                "Third-party data source. Predictions are not included. "
+                "Verify important decisions against official USCIS and "
+                "Department of State information."
+            ),
+        },
+        "latest": {
+            "bulletin": final_action["bulletin"],
+            "finalActionDates": final_action["values"],
+            "datesForFiling": dates_for_filing["values"],
+        },
+    }
 
     OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-    with OUTPUT_FILE.open("w", encoding="utf-8") as output:
-        json.dump(
-            result,
-            output,
-            ensure_ascii=False,
-            indent=2,
-            sort_keys=False,
-        )
-        output.write("\n")
+    temporary_file = OUTPUT_FILE.with_suffix(".json.tmp")
+    temporary_file.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary_file.replace(OUTPUT_FILE)
 
-    print(f"Created {OUTPUT_FILE}")
+    print(f"Successfully wrote {OUTPUT_FILE}")
     print(json.dumps(result, ensure_ascii=False, indent=2))
+
+    # existing_result is intentionally only kept for diagnostics.
+    # The output file is replaced only after both charts pass validation.
+    if existing_result:
+        print("Previous result existed and was replaced after validation.")
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as error:
-        print(f"ERROR: {error}", file=sys.stderr)
-        sys.exit(1)
+    asyncio.run(main())
