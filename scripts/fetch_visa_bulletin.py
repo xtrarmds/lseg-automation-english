@@ -21,11 +21,15 @@ URLS = {
 OUTPUT_FILE = Path("docs/result.json")
 
 
-# Core categories are required.
-# Optional EB-4/EB-5 categories are collected only when they belong
-# to the latest bulletin.
+# These are the categories that the script attempts to extract.
+#
+# EB-1, EB-2, EB-3 and EB-3 Other Workers are required.
+# EB-4 and EB-5 categories are optional because the source site
+# may associate some legacy EB-5 categories with an older bulletin.
 CATEGORY_PATTERNS = {
-    "EB-1": r"EB-1:\s*Priority Workers",
+    "EB-1": (
+        r"EB-1:\s*Priority Workers"
+    ),
     "EB-2": (
         r"EB-2:\s*Professionals with Advanced Degrees"
     ),
@@ -103,6 +107,9 @@ MONTH_ABBREVIATIONS = {
 }
 
 
+# This pattern must always be enclosed in a non-capturing group
+# when combined with additional regex expressions because it
+# contains alternation operators.
 MONTH_PATTERN = (
     r"Jan(?:uary)?|"
     r"Feb(?:ruary)?|"
@@ -121,7 +128,7 @@ MONTH_PATTERN = (
 
 def normalize_bulletin_month(value: str) -> str:
     """
-    Convert bulletin month values to YYYY-MM.
+    Convert a bulletin month to YYYY-MM.
 
     Examples:
         August 2026 -> 2026-08
@@ -131,7 +138,7 @@ def normalize_bulletin_month(value: str) -> str:
     value = " ".join(value.split()).strip()
 
     match = re.fullmatch(
-        rf"({MONTH_PATTERN})\s+(\d{{4}})",
+        rf"((?:{MONTH_PATTERN}))\s+(\d{{4}})",
         value,
         re.IGNORECASE,
     )
@@ -141,8 +148,10 @@ def normalize_bulletin_month(value: str) -> str:
             f"Unsupported bulletin month: {value!r}"
         )
 
-    month_name, year = match.groups()
-    month_number = MONTH_NUMBERS.get(month_name.lower())
+    month_name = match.group(1).lower()
+    year = match.group(2)
+
+    month_number = MONTH_NUMBERS.get(month_name)
 
     if month_number is None:
         raise ValueError(
@@ -174,7 +183,7 @@ def format_bulletin_month(value: str) -> str:
 
     if month_name is None:
         raise ValueError(
-            f"Invalid month number: {month_number!r}"
+            f"Invalid bulletin month number: {month_number!r}"
         )
 
     return f"{month_name} {year}"
@@ -182,23 +191,25 @@ def format_bulletin_month(value: str) -> str:
 
 def normalize_cutoff(value: str) -> str:
     """
-    Convert cutoff values to JSON-friendly values.
+    Convert cutoff values to consistent JSON values.
 
     Examples:
-        Dec 01, 2023 -> 2023-12-01
+        Dec 01, 2023    -> 2023-12-01
         December 1, 2023 -> 2023-12-01
-        Current -> C
-        Unavailable -> U
+        Current          -> C
+        Unavailable      -> U
     """
     value = " ".join(value.split()).strip()
 
-    if value.lower() in {
+    normalized_lower = value.lower()
+
+    if normalized_lower in {
         "current",
         "c",
     }:
         return "C"
 
-    if value.lower() in {
+    if normalized_lower in {
         "unavailable",
         "unauthorized",
         "u",
@@ -206,7 +217,7 @@ def normalize_cutoff(value: str) -> str:
         return "U"
 
     match = re.fullmatch(
-        rf"({MONTH_PATTERN})"
+        rf"((?:{MONTH_PATTERN}))"
         rf"\s+(\d{{1,2}}),\s+(\d{{4}})",
         value,
         re.IGNORECASE,
@@ -217,27 +228,30 @@ def normalize_cutoff(value: str) -> str:
             f"Unsupported cutoff value: {value!r}"
         )
 
-    month_name, day, year = match.groups()
-    month_number = MONTH_NUMBERS.get(
-        month_name.lower()
-    )
+    month_name = match.group(1).lower()
+    day = int(match.group(2))
+    year = match.group(3)
+
+    month_number = MONTH_NUMBERS.get(month_name)
 
     if month_number is None:
         raise ValueError(
             f"Unknown cutoff month: {month_name!r}"
         )
 
-    return (
-        f"{year}-{month_number}-{int(day):02d}"
-    )
+    if day < 1 or day > 31:
+        raise ValueError(
+            f"Invalid cutoff day: {day}"
+        )
+
+    return f"{year}-{month_number}-{day:02d}"
 
 
 def extract_latest_bulletin_month(text: str) -> str:
     """
-    Extract and normalize the latest bulletin month shown
-    near the top of the page.
+    Extract the latest bulletin month near the top of the page.
 
-    Examples:
+    Supported examples:
         Latest edition: August 2026 Visa Bulletin
         Visa Bulletin — August 2026
     """
@@ -260,55 +274,23 @@ def extract_latest_bulletin_month(text: str) -> str:
             re.IGNORECASE,
         )
 
-        if match:
-            bulletin_text = " ".join(
-                match.group(1).split()
-            )
+        if not match:
+            continue
 
-            print(
-                "Latest bulletin text matched: "
-                f"{bulletin_text}"
-            )
-
-            return normalize_bulletin_month(
-                bulletin_text
-            )
-
-    raise RuntimeError(
-        "Could not determine the latest "
-        "Visa Bulletin month"
-    )
-    """
-    Extract and normalize the latest bulletin month shown
-    near the top of the page.
-    """
-    patterns = [
-        (
-            rf"Latest edition:\s*"
-            rf"({MONTH_PATTERN}\s+\d{{4}})"
-            rf"\s+Visa Bulletin"
-        ),
-        (
-            rf"Visa Bulletin\s*[—-]\s*"
-            rf"({MONTH_PATTERN}\s+\d{{4}})"
-        ),
-    ]
-
-    for pattern in patterns:
-        match = re.search(
-            pattern,
-            text,
-            re.IGNORECASE,
+        bulletin_text = " ".join(
+            match.group(1).split()
         )
 
-        if match:
-            return normalize_bulletin_month(
-                match.group(1)
-            )
+        print(
+            f"Latest bulletin text matched: {bulletin_text}"
+        )
+
+        return normalize_bulletin_month(
+            bulletin_text
+        )
 
     raise RuntimeError(
-        "Could not determine the latest "
-        "Visa Bulletin month"
+        "Could not determine the latest Visa Bulletin month"
     )
 
 
@@ -317,10 +299,9 @@ def extract_category(
     category_pattern: str,
 ) -> tuple[str, str]:
     """
-    Extract the bulletin month and Current Cutoff for one
-    category.
+    Extract the bulletin month and Current Cutoff for a category.
 
-    Expected text near a category resembles:
+    Expected rendered text resembles:
 
         EB-1: Priority Workers
         Aug 2026
@@ -329,8 +310,8 @@ def extract_category(
         Jun 07-Aug 26, 2023
         ...
 
-    The first value after the bulletin month is the Current
-    Cutoff. Later values are predictions and are ignored.
+    The first date after the bulletin month is the Current Cutoff.
+    All later dates are predictions and are ignored.
     """
     category_match = re.search(
         category_pattern,
@@ -344,16 +325,16 @@ def extract_category(
             f"{category_pattern}"
         )
 
-    # Examine only a short section after the category heading.
-    # This avoids accidentally reading historical chart data or
-    # another category farther down the page.
+    # Only inspect the text immediately after the category heading.
+    # This helps avoid accidentally matching historical chart data.
     section = text[
         category_match.end():
-        category_match.end() + 600
+        category_match.end() + 700
     ]
 
     bulletin_match = re.search(
-        rf"\b({MONTH_PATTERN})\s+(\d{{4}})\b",
+        rf"\b((?:{MONTH_PATTERN}))"
+        rf"\s+(\d{{4}})\b",
         section,
         re.IGNORECASE,
     )
@@ -373,6 +354,7 @@ def extract_category(
         bulletin_text
     )
 
+    # Search only after the category's bulletin month.
     after_bulletin = section[
         bulletin_match.end():
     ]
@@ -409,9 +391,9 @@ async def fetch_page_text(
     url: str,
 ) -> str:
     """
-    Load one page through Chromium and return its rendered
-    body text.
+    Load the page through Chromium and return rendered body text.
     """
+    print()
     print(f"Opening URL: {url}")
 
     response = await page.goto(
@@ -433,20 +415,24 @@ async def fetch_page_text(
             f"HTTP {response.status} returned for {url}"
         )
 
-    # Allow JavaScript-rendered data to finish loading.
+    # Wait for client-side rendering to finish.
     await page.wait_for_timeout(7000)
 
-    text = await page.locator("body").inner_text(
+    body = page.locator("body")
+
+    text = await body.inner_text(
         timeout=30000
     )
 
-    print(f"Page title: {await page.title()}")
+    title = await page.title()
+
+    print(f"Page title: {title}")
     print(f"Body text length: {len(text)}")
 
     if "Current Cutoff" not in text:
         raise RuntimeError(
-            "Page loaded, but the Current Cutoff "
-            f"table was not found: {url}"
+            "Page loaded, but the Current Cutoff table "
+            f"was not found: {url}"
         )
 
     if "EB-1: Priority Workers" not in text:
@@ -464,14 +450,16 @@ async def extract_chart(
     url: str,
 ) -> dict:
     """
-    Extract one complete chart.
+    Extract one chart.
 
-    Core categories must exist and belong to the latest
-    bulletin. Optional categories are retained only if they
+    Required categories must exist and belong to the latest
+    bulletin. Optional categories are published only if they
     also belong to the latest bulletin.
     """
     print()
+    print("=" * 70)
     print(f"Fetching {chart_name}: {url}")
+    print("=" * 70)
 
     text = await fetch_page_text(
         page,
@@ -492,31 +480,27 @@ async def extract_chart(
     skipped_categories = {}
     required_row_months = set()
 
-    for (
-        category_name,
-        category_pattern,
-    ) in CATEGORY_PATTERNS.items():
+    for category_name, category_pattern in CATEGORY_PATTERNS.items():
         try:
-            (
-                category_month,
-                cutoff,
-            ) = extract_category(
+            category_month, cutoff = extract_category(
                 text,
                 category_pattern,
             )
 
             category_bulletins[
                 category_name
-            ] = category_month
+            ] = format_bulletin_month(
+                category_month
+            )
 
             if category_name in REQUIRED_CATEGORIES:
                 required_row_months.add(
                     category_month
                 )
 
-            # Only publish categories that belong to the latest
-            # bulletin. Some legacy EB-5 categories still show
-            # Apr 2022 on the website.
+            # Only publish category data belonging to the current
+            # latest bulletin. Some legacy EB-5 categories on the
+            # website may still be associated with Apr 2022.
             if category_month == latest_month:
                 current_values[
                     category_name
@@ -532,10 +516,8 @@ async def extract_chart(
                     category_name
                 ] = {
                     "cutoff": cutoff,
-                    "bulletin": (
-                        format_bulletin_month(
-                            category_month
-                        )
+                    "bulletin": format_bulletin_month(
+                        category_month
                     ),
                     "reason": (
                         "Category does not belong to "
@@ -544,22 +526,18 @@ async def extract_chart(
                 }
 
                 print(
-                    f"  Skipping {category_name}: "
-                    f"{cutoff} "
+                    f"  Skipping {category_name}: {cutoff} "
                     f"(category bulletin: "
                     f"{format_bulletin_month(category_month)}, "
                     f"latest bulletin: "
                     f"{format_bulletin_month(latest_month)})"
                 )
 
-        except (
-            RuntimeError,
-            ValueError,
-        ) as exc:
+        except (RuntimeError, ValueError) as exc:
             if category_name in REQUIRED_CATEGORIES:
                 raise RuntimeError(
-                    f"Required category "
-                    f"{category_name} failed: {exc}"
+                    f"Required category {category_name} "
+                    f"failed: {exc}"
                 ) from exc
 
             print(
@@ -569,7 +547,7 @@ async def extract_chart(
 
     missing_categories = (
         REQUIRED_CATEGORIES
-        - current_values.keys()
+        - set(current_values.keys())
     )
 
     if missing_categories:
@@ -581,10 +559,8 @@ async def extract_chart(
 
     if len(required_row_months) != 1:
         displayed_months = [
-            format_bulletin_month(value)
-            for value in sorted(
-                required_row_months
-            )
+            format_bulletin_month(month)
+            for month in sorted(required_row_months)
         ]
 
         raise RuntimeError(
@@ -601,31 +577,23 @@ async def extract_chart(
         raise RuntimeError(
             f"{chart_name} latest edition is "
             f"{format_bulletin_month(latest_month)}, "
-            f"but required category rows show "
+            f"but required categories show "
             f"{format_bulletin_month(required_month)}"
         )
 
     return {
         "bulletin": latest_month,
         "values": current_values,
-        "categoryBulletins": {
-            category_name: format_bulletin_month(
-                month_value
-            )
-            for (
-                category_name,
-                month_value,
-            ) in category_bulletins.items()
-        },
+        "categoryBulletins": category_bulletins,
         "skippedCategories": skipped_categories,
     }
 
 
 def load_existing_result() -> dict | None:
     """
-    Load the previous result for diagnostics.
+    Load the existing result for diagnostic purposes.
 
-    The previous file is never overwritten until both charts
+    The existing result is not overwritten until both charts
     have been fetched and validated successfully.
     """
     if not OUTPUT_FILE.exists():
@@ -637,10 +605,7 @@ def load_existing_result() -> dict | None:
                 encoding="utf-8"
             )
         )
-    except (
-        OSError,
-        json.JSONDecodeError,
-    ):
+    except (OSError, json.JSONDecodeError):
         return None
 
 
@@ -721,18 +686,15 @@ async def main() -> None:
                 URLS["datesForFiling"]
             ),
             "notice": (
-                "Third-party data source. Prediction "
-                "columns are not included. Verify "
-                "important immigration decisions against "
-                "official USCIS and Department of State "
-                "information."
+                "Third-party data source. Prediction columns "
+                "are not included. Verify important immigration "
+                "decisions against official USCIS and Department "
+                "of State information."
             ),
         },
         "latest": {
-            "bulletin": (
-                format_bulletin_month(
-                    bulletin_month
-                )
+            "bulletin": format_bulletin_month(
+                bulletin_month
             ),
             "bulletinKey": bulletin_month,
             "finalActionDates": (
@@ -743,26 +705,18 @@ async def main() -> None:
             ),
             "categoryBulletins": {
                 "finalActionDates": (
-                    final_action[
-                        "categoryBulletins"
-                    ]
+                    final_action["categoryBulletins"]
                 ),
                 "datesForFiling": (
-                    dates_for_filing[
-                        "categoryBulletins"
-                    ]
+                    dates_for_filing["categoryBulletins"]
                 ),
             },
             "skippedLegacyCategories": {
                 "finalActionDates": (
-                    final_action[
-                        "skippedCategories"
-                    ]
+                    final_action["skippedCategories"]
                 ),
                 "datesForFiling": (
-                    dates_for_filing[
-                        "skippedCategories"
-                    ]
+                    dates_for_filing["skippedCategories"]
                 ),
             },
         },
@@ -773,8 +727,8 @@ async def main() -> None:
         exist_ok=True,
     )
 
-    # Write to a temporary file first. This prevents a failed or
-    # interrupted run from corrupting the existing result.
+    # Write to a temporary file first. A failed run will therefore
+    # not corrupt the previously published JSON.
     temporary_file = OUTPUT_FILE.with_suffix(
         ".json.tmp"
     )
@@ -789,12 +743,15 @@ async def main() -> None:
         encoding="utf-8",
     )
 
-    temporary_file.replace(OUTPUT_FILE)
+    temporary_file.replace(
+        OUTPUT_FILE
+    )
 
     print()
-    print(
-        f"Successfully wrote {OUTPUT_FILE}"
-    )
+    print("=" * 70)
+    print(f"Successfully wrote {OUTPUT_FILE}")
+    print("=" * 70)
+
     print(
         json.dumps(
             result,
@@ -803,11 +760,11 @@ async def main() -> None:
         )
     )
 
-    if existing_result:
+    if existing_result is not None:
         print()
         print(
-            "Previous result existed and was replaced "
-            "only after both charts passed validation."
+            "Previous result existed and was replaced only "
+            "after both charts passed validation."
         )
 
 
