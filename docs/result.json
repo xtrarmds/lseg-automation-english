@@ -1,7 +1,14 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-07-26T18:08:46.160133+00:00",
+  "dataVersion": "2026-08",
+  "sourceVersion": "Aug 2026",
+  "generatedAt": "2026-07-27T13:11:22.757050+00:00",
+  "lastSuccessfulUpdate": "2026-07-27T13:11:22.757050+00:00",
   "status": "ok",
+  "meta": {
+    "country": "China (mainland born)",
+    "category": "Employment-Based"
+  },
   "source": {
     "name": "visa-bulletin.us",
     "country": "China (mainland born)",
