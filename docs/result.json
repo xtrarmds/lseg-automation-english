@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "dataVersion": "2026-08",
   "sourceVersion": "Aug 2026",
-  "generatedAt": "2026-08-08T13:10:30.111991+00:00",
-  "lastSuccessfulUpdate": "2026-08-08T13:10:30.111991+00:00",
+  "generatedAt": "2026-08-09T13:13:33.863131+00:00",
+  "lastSuccessfulUpdate": "2026-08-09T13:13:33.863131+00:00",
   "status": "ok",
   "meta": {
     "country": "China (mainland born)",
@@ -63,7 +63,7 @@
     "skippedLegacyCategories": {
       "finalActionDates": {
         "EB-5 Targeted Employment Areas / Regional Centers": {
-          "cutoff": "2015-09-15",
+          "cutoff": "U",
           "bulletin": "Apr 2022",
           "reason": "Category does not belong to the latest bulletin"
         }
