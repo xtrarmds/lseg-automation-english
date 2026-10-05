@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "dataVersion": "2026-10",
   "sourceVersion": "Oct 2026",
-  "generatedAt": "2026-10-04T16:50:35.333875+00:00",
-  "lastSuccessfulUpdate": "2026-10-04T16:50:35.333875+00:00",
+  "generatedAt": "2026-10-05T20:33:23.599492+00:00",
+  "lastSuccessfulUpdate": "2026-10-05T20:33:23.599492+00:00",
   "status": "ok",
   "meta": {
     "country": "China (mainland born)",
@@ -46,8 +46,7 @@
         "EB-3 Other Workers": "Oct 2026",
         "EB-4 Special Immigrants": "Oct 2026",
         "EB-4 Religious Workers": "Oct 2026",
-        "EB-5 Unreserved": "Oct 2026",
-        "EB-5 Targeted Employment Areas / Regional Centers": "Apr 2022"
+        "EB-5 Unreserved": "Oct 2026"
       },
       "datesForFiling": {
         "EB-1": "Oct 2026",
@@ -56,25 +55,12 @@
         "EB-3 Other Workers": "Oct 2026",
         "EB-4 Special Immigrants": "Oct 2026",
         "EB-4 Religious Workers": "Oct 2026",
-        "EB-5 Unreserved": "Oct 2026",
-        "EB-5 Targeted Employment Areas / Regional Centers": "Apr 2022"
+        "EB-5 Unreserved": "Oct 2026"
       }
     },
     "skippedLegacyCategories": {
-      "finalActionDates": {
-        "EB-5 Targeted Employment Areas / Regional Centers": {
-          "cutoff": "U",
-          "bulletin": "Apr 2022",
-          "reason": "Category does not belong to the latest bulletin"
-        }
-      },
-      "datesForFiling": {
-        "EB-5 Targeted Employment Areas / Regional Centers": {
-          "cutoff": "2015-12-15",
-          "bulletin": "Apr 2022",
-          "reason": "Category does not belong to the latest bulletin"
-        }
-      }
+      "finalActionDates": {},
+      "datesForFiling": {}
     }
   }
 }
