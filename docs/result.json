@@ -1,9 +1,9 @@
 {
   "schemaVersion": 2,
-  "dataVersion": "2026-10",
-  "sourceVersion": "Oct 2026",
-  "generatedAt": "2026-10-22T17:06:26.474585+00:00",
-  "lastSuccessfulUpdate": "2026-10-22T17:06:26.474585+00:00",
+  "dataVersion": "2026-11",
+  "sourceVersion": "Nov 2026",
+  "generatedAt": "2026-10-23T17:01:32.523590+00:00",
+  "lastSuccessfulUpdate": "2026-10-23T17:01:32.523590+00:00",
   "status": "ok",
   "meta": {
     "country": "China (mainland born)",
@@ -18,12 +18,12 @@
     "notice": "Third-party data source. Prediction columns are not included. Verify important immigration decisions against official USCIS and Department of State information."
   },
   "latest": {
-    "bulletin": "Oct 2026",
-    "bulletinKey": "2026-10",
+    "bulletin": "Nov 2026",
+    "bulletinKey": "2026-11",
     "finalActionDates": {
-      "EB-1": "2023-07-01",
+      "EB-1": "2023-08-01",
       "EB-2": "2021-10-01",
-      "EB-3": "2022-01-08",
+      "EB-3": "2022-01-22",
       "EB-3 Other Workers": "2019-10-01",
       "EB-4 Special Immigrants": "2022-12-15",
       "EB-4 Religious Workers": "2022-12-15",
@@ -40,22 +40,22 @@
     },
     "categoryBulletins": {
       "finalActionDates": {
-        "EB-1": "Oct 2026",
-        "EB-2": "Oct 2026",
-        "EB-3": "Oct 2026",
-        "EB-3 Other Workers": "Oct 2026",
-        "EB-4 Special Immigrants": "Oct 2026",
-        "EB-4 Religious Workers": "Oct 2026",
-        "EB-5 Unreserved": "Oct 2026"
+        "EB-1": "Nov 2026",
+        "EB-2": "Nov 2026",
+        "EB-3": "Nov 2026",
+        "EB-3 Other Workers": "Nov 2026",
+        "EB-4 Special Immigrants": "Nov 2026",
+        "EB-4 Religious Workers": "Nov 2026",
+        "EB-5 Unreserved": "Nov 2026"
       },
       "datesForFiling": {
-        "EB-1": "Oct 2026",
-        "EB-2": "Oct 2026",
-        "EB-3": "Oct 2026",
-        "EB-3 Other Workers": "Oct 2026",
-        "EB-4 Special Immigrants": "Oct 2026",
-        "EB-4 Religious Workers": "Oct 2026",
-        "EB-5 Unreserved": "Oct 2026"
+        "EB-1": "Nov 2026",
+        "EB-2": "Nov 2026",
+        "EB-3": "Nov 2026",
+        "EB-3 Other Workers": "Nov 2026",
+        "EB-4 Special Immigrants": "Nov 2026",
+        "EB-4 Religious Workers": "Nov 2026",
+        "EB-5 Unreserved": "Nov 2026"
       }
     },
     "skippedLegacyCategories": {
